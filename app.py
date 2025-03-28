@@ -5,6 +5,9 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from pdf2image import convert_from_path
 from zipfile import ZipFile
+import pytesseract
+import cv2
+import numpy as np
 
 def wrap_text(text, font, max_width):
     words = text.split()
@@ -40,6 +43,29 @@ def draw_centered_text(draw, text, font, x, y, max_width):
         new_x = x + (max_width - line_width) // 2
         line_y = y + (i * line_spacing)
         draw.text((new_x, line_y), line, font=font, fill="black")
+
+def analyze_template(template_path):
+    # Convert PDF to image
+    image = cv2.imread(template_path)
+    if image is None:
+        raise ValueError("Could not read the image")
+    
+    # Convert to grayscale properly
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    
+    # Extract text and positions using OCR
+    text_data = pytesseract.image_to_data(gray, output_type=pytesseract.Output.DICT)
+    
+    # Analyze layout and create position dictionary
+    positions = {}
+    for i, text in enumerate(text_data['text']):
+        if text.strip():
+            x = text_data['left'][i]
+            y = text_data['top'][i]
+            width = text_data['width'][i]
+            positions[text.strip()] = (x, y, width)
+    
+    return positions
 
 def generate_certificate_pdf(student_data, template_image, text_positions, font_size):
     image = Image.open(template_image)
@@ -89,16 +115,13 @@ if uploaded_pdf and uploaded_data:
     pdf_path = "uploaded_certificate.pdf"
     with open(pdf_path, "wb") as f:
         f.write(uploaded_pdf.read())
+    
+    # Convert PDF and analyze template
     images = convert_from_path(pdf_path, first_page=1, last_page=1)
     template_image_path = "certificate_template.png"
     images[0].save(template_image_path, "PNG")
-
-    if uploaded_data.name.endswith('.csv'):
-        df = pd.read_csv(uploaded_data, encoding='cp1252', skipinitialspace=False)
-        df.columns = df.columns.str.strip()
-    else:
-        df = pd.read_excel(uploaded_data)
     
+    # Use predefined positions instead of neural network predictions
     text_positions = {
         "SR. No.": (200, 500, 200),
         "Std": (1000, 1455, 100),
@@ -132,6 +155,12 @@ if uploaded_pdf and uploaded_data:
         "Reason of Leaving the School": (550, 1685, 500),
         "Remark": (310, 1765, 800),  # Increased max_width from 300 to 800
     }
+
+    if uploaded_data.name.endswith('.csv'):
+        df = pd.read_csv(uploaded_data, encoding='cp1252', skipinitialspace=False)
+        df.columns = df.columns.str.strip()
+    else:
+        df = pd.read_excel(uploaded_data)
 
     for idx, row in df.iterrows():
         student_data = row.to_dict()
